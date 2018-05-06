@@ -405,6 +405,10 @@ static void
 api_bus_post_message (GstPlayer *self, GstPlayerMessage message_type) {
   GstStructure *message_data = create_message_data_from_state (self, message_type);
 
+  GST_INFO ("API bus: %s-message: %s",
+    gst_player_message_get_name (message_type),
+    gst_structure_to_string (message_data));
+
   // Q: Rather use gst_message_new_application here? But then again, this IS from inside gst,
   //    since GstPlayer is a GstObject.
   GstMessage *msg = gst_message_new_custom (GST_MESSAGE_ANY, 
