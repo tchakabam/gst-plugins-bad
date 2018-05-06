@@ -162,12 +162,20 @@ struct _GstPlayer
   GMainContext *context;
   GMainLoop *loop;
 
+  GstBus *api_bus;
+
+  gint video_width, video_height;
+
   GstElement *playbin;
   GstBus *bus;
   GstState target_state, current_state;
   gboolean is_live, is_eos;
   GSource *tick_source, *ready_timeout_source;
+
+  GError *warning, *error;
+
   GstClockTime cached_duration;
+  GstClockTime cached_position;
 
   gdouble rate;
 
@@ -271,6 +279,8 @@ static void *get_cover_sample (GstTagList * tags);
 
 static void remove_seek_source (GstPlayer * self);
 
+static gboolean query_position (GstPlayer *self, gint64* position);
+
 static void
 gst_player_init (GstPlayer * self)
 {
@@ -296,7 +306,115 @@ gst_player_init (GstPlayer * self)
   self->last_seek_time = GST_CLOCK_TIME_NONE;
   self->inhibit_sigs = FALSE;
 
+  self->cached_position = 0;
+  self->cached_duration = GST_CLOCK_TIME_NONE;
+
+  self->api_bus = gst_bus_new ();
+
   GST_TRACE_OBJECT (self, "Initialized");
+}
+
+/**
+ * Should only be called under locked state!
+ * 
+ */
+static GstStructure* 
+create_message_data_from_state (GstPlayer *self, GstPlayerMessage message_type) {
+  // TODO: Make structure name a GQuark
+  GstStructure *message_data = gst_structure_new_empty ("gst-player-message-data");
+  GValue type = G_VALUE_INIT;
+  g_value_init (&type, G_TYPE_ENUM);
+  g_value_set_enum (&type, message_type);
+  gst_structure_set_value (message_data, "type", &type);
+
+  GValue value = G_VALUE_INIT;
+  // Q: Mutex may be needed if we decouple calling message creation from 
+  //    updating internals somehow...?
+
+  switch (message_type) {
+  case GST_PLAYER_MESSAGE_URI_LOADED:
+    g_value_init (&value, G_TYPE_STRING);
+    g_value_set_string (&value, self->uri);
+    gst_structure_set_value (message_data, "uri", &value);
+    break;
+  case GST_PLAYER_MESSAGE_POSITION_UPDATED:
+    g_value_init (&value, G_TYPE_INT64);
+    g_value_set_int64 (&value, self->cached_position);
+    gst_structure_set_value (message_data, "position", &value);
+    break;
+  case GST_PLAYER_MESSAGE_DURATION_CHANGED:
+    g_value_init (&value, G_TYPE_INT64);
+    g_value_set_int64 (&value, self->cached_duration);
+    gst_structure_set_value (message_data, "duration", &value);
+    break;
+  case GST_PLAYER_MESSAGE_STATE_CHANGED:
+    g_value_init (&value, G_TYPE_ENUM);
+    g_value_set_enum (&value, self->app_state);
+    gst_structure_set_value (message_data, "state", &value);
+    break;
+  case GST_PLAYER_MESSAGE_BUFFERING:
+    g_value_init (&value, G_TYPE_UINT);
+    g_value_set_uint (&value, self->buffering);
+    gst_structure_set_value (message_data, "percent", &value);
+    break;
+  case GST_PLAYER_MESSAGE_END_OF_STREAM:
+    break;
+  case GST_PLAYER_MESSAGE_ERROR:
+    g_value_init (&value, G_TYPE_ERROR);
+    g_value_take_object (&value, g_error_copy(self->error));
+    gst_structure_set_value (message_data, "error", &value);
+    break;
+  case GST_PLAYER_MESSAGE_WARNING:
+    g_value_init (&value, G_TYPE_ERROR);
+    g_value_take_object (&value, g_error_copy(self->warning));
+    gst_structure_set_value (message_data, "warning", &value);
+    break;
+  case GST_PLAYER_MESSAGE_VIDEO_DIMENSIONS_CHANGED:
+    g_value_init (&value, G_TYPE_UINT);
+    g_value_set_uint (&value, self->video_width);
+    gst_structure_set_value (message_data, "width", &value);
+    g_value_init (&value, G_TYPE_UINT);
+    g_value_set_uint (&value, self->video_height);
+    gst_structure_set_value (message_data, "height", &value);
+    break;
+  case GST_PLAYER_MESSAGE_MEDIA_INFO_UPDATED:
+    g_value_init (&value, GST_TYPE_PLAYER_MEDIA_INFO);
+    g_value_take_object(&value, gst_player_get_media_info (self));
+    gst_structure_set_value (message_data, "media-info-ref", &value);
+    break;
+  case GST_PLAYER_MESSAGE_VOLUME_CHANGED:
+    g_value_init (&value, G_TYPE_DOUBLE);
+    g_value_set_double (&value, gst_player_get_volume (self));
+    gst_structure_set_value (message_data, "volume", &value);
+    break;
+  case GST_PLAYER_MESSAGE_MUTE_CHANGED:
+    g_value_init (&value, G_TYPE_BOOLEAN);
+    g_value_set_boolean (&value, gst_player_get_mute(self));
+    gst_structure_set_value (message_data, "mute", &value);
+    break;
+  case GST_PLAYER_MESSAGE_SEEK_DONE:
+    g_value_init (&value, G_TYPE_INT64);
+    g_value_set_int64 (&value, gst_player_get_position (self));
+    gst_structure_set_value (message_data, "position", &value);
+    break;
+  default:
+    // Q: handle this some way?
+    break;
+  }
+
+  return message_data;
+}
+
+static void 
+api_bus_post_message (GstPlayer *self, GstPlayerMessage message_type) {
+  GstStructure *message_data = create_message_data_from_state (self, message_type);
+
+  // Q: Rather use gst_message_new_application here? But then again, this IS from inside gst,
+  //    since GstPlayer is a GstObject.
+  GstMessage *msg = gst_message_new_custom (GST_MESSAGE_ANY, 
+    GST_OBJECT(self), message_data);
+
+  gst_bus_post (self->api_bus, msg);
 }
 
 static void
@@ -596,6 +714,9 @@ gst_player_set_uri_internal (gpointer user_data)
 
     data->player = g_object_ref (self);
     data->uri = g_strdup (self->uri);
+
+    api_bus_post_message (self, GST_PLAYER_MESSAGE_URI_LOADED);
+
     gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
         uri_loaded_dispatch, data,
         (GDestroyNotify) uri_loaded_signal_data_free);
@@ -761,8 +882,7 @@ gst_player_get_property (GObject * object, guint prop_id,
       break;
     case PROP_POSITION:{
       gint64 position = GST_CLOCK_TIME_NONE;
-
-      gst_element_query_position (self->playbin, GST_FORMAT_TIME, &position);
+      query_position(self, &position);
       g_value_set_uint64 (value, position);
       GST_TRACE_OBJECT (self, "Returning position=%" GST_TIME_FORMAT,
           GST_TIME_ARGS (g_value_get_uint64 (value)));
@@ -885,6 +1005,7 @@ change_state (GstPlayer * self, GstPlayerState state)
   GST_DEBUG_OBJECT (self, "Changing app state from %s to %s",
       gst_player_state_get_name (self->app_state),
       gst_player_state_get_name (state));
+
   self->app_state = state;
 
   if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
@@ -893,6 +1014,9 @@ change_state (GstPlayer * self, GstPlayerState state)
 
     data->player = g_object_ref (self);
     data->state = state;
+
+    api_bus_post_message (self, GST_PLAYER_MESSAGE_STATE_CHANGED);
+
     gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
         state_changed_dispatch, data,
         (GDestroyNotify) state_changed_signal_data_free);
@@ -932,13 +1056,14 @@ static gboolean
 tick_cb (gpointer user_data)
 {
   GstPlayer *self = GST_PLAYER (user_data);
-  gint64 position;
 
-  if (self->target_state >= GST_STATE_PAUSED
-      && gst_element_query_position (self->playbin, GST_FORMAT_TIME,
-          &position)) {
-    GST_LOG_OBJECT (self, "Position %" GST_TIME_FORMAT,
-        GST_TIME_ARGS (position));
+  gint64 position;
+  if (query_position(self, &position)) {
+    // Q: no mutex really neded here as we will always do the r/w
+    //    sequentially, but it might be necessary once we want to implement 
+    //    a position getter
+    api_bus_post_message (self, GST_PLAYER_MESSAGE_POSITION_UPDATED);
+    // TODO: position getter?
 
     if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
             signals[SIGNAL_POSITION_UPDATED], 0, NULL, NULL, NULL) != 0) {
@@ -946,6 +1071,7 @@ tick_cb (gpointer user_data)
 
       data->player = g_object_ref (self);
       data->position = position;
+
       gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
           position_updated_dispatch, data,
           (GDestroyNotify) position_updated_signal_data_free);
@@ -953,6 +1079,26 @@ tick_cb (gpointer user_data)
   }
 
   return G_SOURCE_CONTINUE;
+}
+
+/**
+ * Returns true when position is queried and differed from cached position.
+ * Sets position to cached value, and to queried value if position can be queried
+ * and different.
+ */
+static gboolean query_position (GstPlayer *self, gint64* position) {
+  *position = self->cached_position;
+  if (self->target_state >= GST_STATE_PAUSED
+      && gst_element_query_position (self->playbin, GST_FORMAT_TIME, position)) {
+    GST_LOG_OBJECT (self, "Queried position %" GST_TIME_FORMAT,
+        GST_TIME_ARGS (position));
+    // is there an actual diff of position?
+    if (self->cached_position != *position) {
+      self->cached_position = *position;
+      return TRUE;
+    }
+  }
+  return FALSE;
 }
 
 static void
@@ -1053,12 +1199,19 @@ emit_error (GstPlayer * self, GError * err)
   GST_ERROR_OBJECT (self, "Error: %s (%s, %d)", err->message,
       g_quark_to_string (err->domain), err->code);
 
+  if (self->error) {
+    g_error_free (self->error);
+  }
+  self->error = g_error_copy (err);
+  api_bus_post_message (self, GST_PLAYER_MESSAGE_ERROR);
+
   if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
           signals[SIGNAL_ERROR], 0, NULL, NULL, NULL) != 0) {
     ErrorSignalData *data = g_new (ErrorSignalData, 1);
 
     data->player = g_object_ref (self);
     data->err = g_error_copy (err);
+
     gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
         error_dispatch, data, (GDestroyNotify) free_error_signal_data);
   }
@@ -1138,12 +1291,19 @@ emit_warning (GstPlayer * self, GError * err)
   GST_ERROR_OBJECT (self, "Warning: %s (%s, %d)", err->message,
       g_quark_to_string (err->domain), err->code);
 
+  if (self->warning) {
+    g_error_free (self->warning);
+  }
+  self->warning = g_error_copy (err);
+  api_bus_post_message (self, GST_PLAYER_MESSAGE_WARNING);
+
   if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
           signals[SIGNAL_WARNING], 0, NULL, NULL, NULL) != 0) {
     WarningSignalData *data = g_new (WarningSignalData, 1);
 
     data->player = g_object_ref (self);
     data->err = g_error_copy (err);
+
     gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
         warning_dispatch, data, (GDestroyNotify) free_warning_signal_data);
   }
@@ -1254,6 +1414,9 @@ eos_cb (G_GNUC_UNUSED GstBus * bus, G_GNUC_UNUSED GstMessage * msg,
 
   if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
           signals[SIGNAL_END_OF_STREAM], 0, NULL, NULL, NULL) != 0) {
+
+    api_bus_post_message (self, GST_PLAYER_MESSAGE_URI_LOADED);
+
     gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
         eos_dispatch, g_object_ref (self), (GDestroyNotify) g_object_unref);
   }
@@ -1318,20 +1481,22 @@ buffering_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg, gpointer user_data)
   }
 
   if (self->buffering != percent) {
+    self->buffering = percent;
+
+    api_bus_post_message(self, GST_PLAYER_MESSAGE_BUFFERING);
+
     if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
             signals[SIGNAL_BUFFERING], 0, NULL, NULL, NULL) != 0) {
       BufferingSignalData *data = g_new (BufferingSignalData, 1);
 
       data->player = g_object_ref (self);
       data->percent = percent;
+
       gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
           buffering_dispatch, data,
           (GDestroyNotify) buffering_signal_data_free);
     }
-
-    self->buffering = percent;
   }
-
 
   g_mutex_lock (&self->lock);
   if (percent == 100 && (self->seek_position != GST_CLOCK_TIME_NONE ||
@@ -1453,6 +1618,12 @@ out:
     data->player = g_object_ref (self);
     data->width = width;
     data->height = height;
+
+    self->video_width = width;
+    self->video_height = height;
+  
+    api_bus_post_message (self, GST_PLAYER_MESSAGE_VIDEO_DIMENSIONS_CHANGED);
+
     gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
         video_dimensions_changed_dispatch, data,
         (GDestroyNotify) video_dimensions_changed_signal_data_free);
@@ -1558,6 +1729,8 @@ seek_done_signal_data_free (SeekDoneSignalData * data)
 static void
 emit_seek_done (GstPlayer * self)
 {
+  api_bus_post_message(self, GST_PLAYER_MESSAGE_SEEK_DONE);
+
   if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
           signals[SIGNAL_SEEK_DONE], 0, NULL, NULL, NULL) != 0) {
     SeekDoneSignalData *data = g_new (SeekDoneSignalData, 1);
@@ -2020,6 +2193,8 @@ emit_media_info_updated_signal (GstPlayer * self)
   data->info = gst_player_media_info_copy (self->media_info);
   g_mutex_unlock (&self->lock);
 
+  api_bus_post_message (self, GST_PLAYER_MESSAGE_MEDIA_INFO_UPDATED);
+  
   gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
       media_info_updated_dispatch, data,
       (GDestroyNotify) free_media_info_updated_signal_data);
@@ -2804,6 +2979,9 @@ static void
 volume_notify_cb (G_GNUC_UNUSED GObject * obj, G_GNUC_UNUSED GParamSpec * pspec,
     GstPlayer * self)
 {
+
+  api_bus_post_message(self, GST_PLAYER_MESSAGE_VOLUME_CHANGED);
+
   if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
           signals[SIGNAL_VOLUME_CHANGED], 0, NULL, NULL, NULL) != 0) {
     gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
@@ -2828,6 +3006,9 @@ static void
 mute_notify_cb (G_GNUC_UNUSED GObject * obj, G_GNUC_UNUSED GParamSpec * pspec,
     GstPlayer * self)
 {
+
+  api_bus_post_message(self, GST_PLAYER_MESSAGE_MUTE_CHANGED);
+
   if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
           signals[SIGNAL_MUTE_CHANGED], 0, NULL, NULL, NULL) != 0) {
     gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
