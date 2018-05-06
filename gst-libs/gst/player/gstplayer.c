@@ -314,10 +314,6 @@ gst_player_init (GstPlayer * self)
   GST_TRACE_OBJECT (self, "Initialized");
 }
 
-/**
- * Should only be called under locked state!
- * 
- */
 static GstStructure* 
 create_message_data_from_state (GstPlayer *self, GstPlayerMessage message_type) {
   // TODO: Make structure name a GQuark
