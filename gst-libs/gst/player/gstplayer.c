@@ -4614,6 +4614,42 @@ gst_player_state_get_name (GstPlayerState state)
   return NULL;
 }
 
+const gchar *
+gst_player_message_get_name (GstPlayerMessage message_type) {
+  switch (message_type) {
+  case GST_PLAYER_MESSAGE_URI_LOADED:
+    return "uri-loaded";
+  case GST_PLAYER_MESSAGE_POSITION_UPDATED:
+    return "position-updated";
+    break;
+  case GST_PLAYER_MESSAGE_DURATION_CHANGED:
+    return "duration";
+    break;
+  case GST_PLAYER_MESSAGE_STATE_CHANGED:
+    return "state-changed";
+  case GST_PLAYER_MESSAGE_BUFFERING:
+    return "buffering";
+  case GST_PLAYER_MESSAGE_END_OF_STREAM:
+    return "end-of-stream";
+  case GST_PLAYER_MESSAGE_ERROR:
+    return "error";
+  case GST_PLAYER_MESSAGE_WARNING:
+    return "warning";
+  case GST_PLAYER_MESSAGE_VIDEO_DIMENSIONS_CHANGED:
+    return "video-dimensions-changed";
+  case GST_PLAYER_MESSAGE_MEDIA_INFO_UPDATED:
+    return "media-info-updated";
+  case GST_PLAYER_MESSAGE_VOLUME_CHANGED:
+    return "volume-changed";
+  case GST_PLAYER_MESSAGE_MUTE_CHANGED:
+    return "mute-changed";
+  case GST_PLAYER_MESSAGE_SEEK_DONE:
+    return "seek-done";
+  default:
+    g_assert_not_reached ();
+  }
+}
+
 GType
 gst_player_error_get_type (void)
 {

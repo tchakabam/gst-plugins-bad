@@ -89,6 +89,9 @@ GST_PLAYER_API
 const gchar *gst_player_state_get_name                (GstPlayerState state);
 
 GST_PLAYER_API
+const gchar * gst_player_message_get_name (GstPlayerMessage message_type);
+
+GST_PLAYER_API
 GQuark       gst_player_error_quark                   (void);
 
 GST_PLAYER_API
