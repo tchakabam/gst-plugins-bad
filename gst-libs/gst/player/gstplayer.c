@@ -323,9 +323,9 @@ create_message_data_from_state (GstPlayer *self, GstPlayerMessage message_type) 
   // TODO: Make structure name a GQuark
   GstStructure *message_data = gst_structure_new_empty ("gst-player-message-data");
   GValue type = G_VALUE_INIT;
-  g_value_init (&type, G_TYPE_ENUM);
-  g_value_set_enum (&type, message_type);
-  gst_structure_set_value (message_data, "type", &type);
+  g_value_init (&type, G_TYPE_INT);
+  g_value_set_int (&type, message_type);
+  gst_structure_set_value (message_data, "message-type", &type);
 
   GValue value = G_VALUE_INIT;
   // Q: Mutex may be needed if we decouple calling message creation from 
@@ -348,7 +348,7 @@ create_message_data_from_state (GstPlayer *self, GstPlayerMessage message_type) 
     gst_structure_set_value (message_data, "duration", &value);
     break;
   case GST_PLAYER_MESSAGE_STATE_CHANGED:
-    g_value_init (&value, G_TYPE_ENUM);
+    g_value_init (&value, GST_TYPE_PLAYER_STATE);
     g_value_set_enum (&value, self->app_state);
     gst_structure_set_value (message_data, "state", &value);
     break;
