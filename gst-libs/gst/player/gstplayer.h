@@ -156,7 +156,7 @@ GST_PLAYER_API
 GstPlayer *  gst_player_new                           (GstPlayerVideoRenderer * video_renderer, GstPlayerSignalDispatcher * signal_dispatcher);
 
 GST_PLAYER_API
-GstBus * gst_player_get_message_bus                   (GstPlayer    * player);
+GstBus *     gst_player_get_message_bus               (GstPlayer    * player);
 
 GST_PLAYER_API
 void         gst_player_play                          (GstPlayer    * player);
