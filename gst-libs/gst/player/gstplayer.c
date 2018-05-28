@@ -402,9 +402,9 @@ static void
 api_bus_post_message (GstPlayer *self, GstPlayerMessage message_type) {
   GstStructure *message_data = create_message_data_from_state (self, message_type);
 
-  GST_INFO ("API bus: %s-message: %s",
+  GST_INFO ("API bus: %s-message: %" GST_PTR_FORMAT,
     gst_player_message_get_name (message_type),
-    gst_structure_to_string (message_data));
+    message_data);
 
   GstMessage *msg = gst_message_new_custom (
     GST_MESSAGE_APPLICATION,
