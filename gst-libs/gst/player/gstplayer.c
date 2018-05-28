@@ -323,8 +323,6 @@ create_message_data_from_state (GstPlayer *self, GstPlayerMessage message_type) 
   gst_structure_set_value (message_data, "message-type", &type);
 
   GValue value = G_VALUE_INIT;
-  // Q: Mutex may be needed if we decouple calling message creation from 
-  //    updating internals somehow...?
 
   switch (message_type) {
   case GST_PLAYER_MESSAGE_URI_LOADED:
