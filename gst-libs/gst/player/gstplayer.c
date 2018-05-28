@@ -293,6 +293,7 @@ gst_player_init (GstPlayer * self)
 
   self->context = g_main_context_new ();
   self->loop = g_main_loop_new (self->context, FALSE);
+  self->api_bus = gst_bus_new ();
 
   /* *INDENT-OFF* */
   self->config = gst_structure_new_id (QUARK_CONFIG,
@@ -308,8 +309,6 @@ gst_player_init (GstPlayer * self)
 
   self->cached_position = 0;
   self->cached_duration = GST_CLOCK_TIME_NONE;
-
-  self->api_bus = gst_bus_new ();
 
   GST_TRACE_OBJECT (self, "Initialized");
 }
@@ -620,6 +619,10 @@ gst_player_dispose (GObject * object)
 
     g_main_context_unref (self->context);
     self->context = NULL;
+  }
+
+  if (self->api_bus) {
+    gst_object_unref(self->api_bus);
   }
 
   G_OBJECT_CLASS (parent_class)->dispose (object);
