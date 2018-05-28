@@ -318,8 +318,8 @@ create_message_data_from_state (GstPlayer *self, GstPlayerMessage message_type) 
   // TODO: Make structure name a GQuark
   GstStructure *message_data = gst_structure_new_empty ("gst-player-message-data");
   GValue type = G_VALUE_INIT;
-  g_value_init (&type, G_TYPE_INT);
-  g_value_set_int (&type, message_type);
+  g_value_init (&type, GST_TYPE_PLAYER_MESSAGE);
+  g_value_set_enum (&type, message_type);
   gst_structure_set_value (message_data, "message-type", &type);
 
   GValue value = G_VALUE_INIT;
@@ -4583,6 +4583,35 @@ gst_player_state_get_type (void)
 
   if (g_once_init_enter (&id)) {
     GType tmp = g_enum_register_static ("GstPlayerState", values);
+    g_once_init_leave (&id, tmp);
+  }
+
+  return (GType) id;
+}
+
+GType
+gst_player_message_get_type (void)
+{
+  static gsize id = 0;
+  static const GEnumValue values[] = {
+    {C_ENUM (GST_PLAYER_MESSAGE_URI_LOADED), "GST_PLAYER_MESSAGE_URI_LOADED", "loaded"},
+    {C_ENUM (GST_PLAYER_MESSAGE_POSITION_UPDATED), "GST_PLAYER_MESSAGE_POSITION_UPDATED", "updated"},
+    {C_ENUM (GST_PLAYER_MESSAGE_DURATION_CHANGED), "GST_PLAYER_MESSAGE_DURATION_CHANGED", "duration-changed"},
+    {C_ENUM (GST_PLAYER_MESSAGE_STATE_CHANGED), "GST_PLAYER_MESSAGE_STATE_CHANGED", "state-changed"},
+    {C_ENUM (GST_PLAYER_MESSAGE_BUFFERING), "GST_PLAYER_MESSAGE_BUFFERING", "buffering"},
+    {C_ENUM (GST_PLAYER_MESSAGE_END_OF_STREAM), "GST_PLAYER_MESSAGE_END_OF_STREAM", "end-of-stream"},
+    {C_ENUM (GST_PLAYER_MESSAGE_ERROR), "GST_PLAYER_MESSAGE_ERROR", "error"},
+    {C_ENUM (GST_PLAYER_MESSAGE_WARNING), "GST_PLAYER_MESSAGE_WARNING", "warning"},
+    {C_ENUM (GST_PLAYER_MESSAGE_VIDEO_DIMENSIONS_CHANGED), "GST_PLAYER_MESSAGE_VIDEO_DIMENSIONS_CHANGED", "video-dimensions-changed"},
+    {C_ENUM (GST_PLAYER_MESSAGE_MEDIA_INFO_UPDATED), "GST_PLAYER_MESSAGE_MEDIA_INFO_UPDATED", "media-info-updated"},
+    {C_ENUM (GST_PLAYER_MESSAGE_VOLUME_CHANGED), "GST_PLAYER_MESSAGE_VOLUME_CHANGED", "volume-changed"},
+    {C_ENUM (GST_PLAYER_MESSAGE_MUTE_CHANGED), "GST_PLAYER_MESSAGE_MUTE_CHANGED", "mute-changed"},
+    {C_ENUM (GST_PLAYER_MESSAGE_SEEK_DONE), "GST_PLAYER_MESSAGE_SEEK_DONE", "seek-done"},
+    {0, NULL, NULL}
+  };
+
+  if (g_once_init_enter (&id)) {
+    GType tmp = g_enum_register_static ("GstPlayerMessage", values);
     g_once_init_leave (&id, tmp);
   }
 

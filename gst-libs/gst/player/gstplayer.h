@@ -35,6 +35,10 @@ GST_PLAYER_API
 GType        gst_player_state_get_type                (void);
 #define      GST_TYPE_PLAYER_STATE                    (gst_player_state_get_type ())
 
+GST_PLAYER_API
+GType        gst_player_message_get_type              (void);
+#define      GST_TYPE_PLAYER_MESSAGE                  (gst_player_message_get_type ())
+
 /**
  * GstPlayerState:
  * @GST_PLAYER_STATE_STOPPED: the player is stopped.
@@ -81,8 +85,7 @@ typedef enum
   GST_PLAYER_MESSAGE_MEDIA_INFO_UPDATED,
   GST_PLAYER_MESSAGE_VOLUME_CHANGED,
   GST_PLAYER_MESSAGE_MUTE_CHANGED,
-  GST_PLAYER_MESSAGE_SEEK_DONE,
-  GST_PLAYER_MESSAGE_LAST
+  GST_PLAYER_MESSAGE_SEEK_DONE
 } GstPlayerMessage;
 
 GST_PLAYER_API
