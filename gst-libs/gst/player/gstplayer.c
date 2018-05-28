@@ -1059,11 +1059,8 @@ tick_cb (gpointer user_data)
 
   gint64 position;
   if (query_position(self, &position)) {
-    // Q: no mutex really neded here as we will always do the r/w
-    //    sequentially, but it might be necessary once we want to implement 
-    //    a position getter
+
     api_bus_post_message (self, GST_PLAYER_MESSAGE_POSITION_UPDATED);
-    // TODO: position getter?
 
     if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
             signals[SIGNAL_POSITION_UPDATED], 0, NULL, NULL, NULL) != 0) {
