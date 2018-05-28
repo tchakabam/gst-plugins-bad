@@ -56,7 +56,10 @@ typedef enum
 } GstPlayerState;
 
 /**
- * GstPlayerMessage
+ *
+ * See #gst_player_get_message_bus
+ *
+ * GstPlayerMessage:
  * @GST_PLAYER_MESSAGE_URI_LOADED
  * @GST_PLAYER_MESSAGE_POSITION_UPDATED
  * @GST_PLAYER_MESSAGE_DURATION_CHANGED
@@ -151,6 +154,9 @@ GType        gst_player_get_type                      (void);
 
 GST_PLAYER_API
 GstPlayer *  gst_player_new                           (GstPlayerVideoRenderer * video_renderer, GstPlayerSignalDispatcher * signal_dispatcher);
+
+GST_PLAYER_API
+GstBus * gst_player_get_message_bus                   (GstPlayer    * player);
 
 GST_PLAYER_API
 void         gst_player_play                          (GstPlayer    * player);

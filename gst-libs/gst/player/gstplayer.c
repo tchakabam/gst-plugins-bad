@@ -320,7 +320,7 @@ create_message_data_from_state (GstPlayer *self, GstPlayerMessage message_type) 
   GValue type = G_VALUE_INIT;
   g_value_init (&type, GST_TYPE_PLAYER_MESSAGE);
   g_value_set_enum (&type, message_type);
-  gst_structure_set_value (message_data, "message-type", &type);
+  gst_structure_set_value (message_data, "player-message", &type);
 
   GValue value = G_VALUE_INIT;
 
@@ -3225,6 +3225,27 @@ gst_player_new (GstPlayerVideoRenderer * video_renderer,
     g_object_unref (signal_dispatcher);
 
   return self;
+}
+
+/**
+ * gst_player_get_message_bus:
+ * @player: #GstPlayer instance
+ *
+ * GstPlayer API exposes a #GstBus instance which purpose it is
+ * to provide data structures representing player-internal events in form of a #GstMessage of type GST_MESSAGE_APPLICATION.
+ *
+ * Each message carries a "player-message" field of type #GstPlayerMessage. Further fields of the message data are specific
+ * to each possible value of that enumeration.
+ *
+ * Applications can consume the messages asynchroneously within their own event-loop / UI-thread etc.
+ * Note that in case the application does not consume the messages, the bus will accumulate these
+ * internally and eventually fill memory. To avoid that, the bus has to be set "flushing".
+ *
+ * Returns: The player message bus instance
+ */
+GstBus *
+gst_player_get_message_bus (GstPlayer * self) {
+  return self->api_bus;
 }
 
 static gboolean
