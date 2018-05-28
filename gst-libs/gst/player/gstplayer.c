@@ -409,9 +409,8 @@ api_bus_post_message (GstPlayer *self, GstPlayerMessage message_type) {
     gst_player_message_get_name (message_type),
     gst_structure_to_string (message_data));
 
-  // Q: Rather use gst_message_new_application here? But then again, this IS from inside gst,
-  //    since GstPlayer is a GstObject.
-  GstMessage *msg = gst_message_new_custom (GST_MESSAGE_ANY, 
+  GstMessage *msg = gst_message_new_custom (
+    GST_MESSAGE_APPLICATION,
     GST_OBJECT(self), message_data);
 
   gst_bus_post (self->api_bus, msg);
