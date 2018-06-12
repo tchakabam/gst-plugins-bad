@@ -173,10 +173,6 @@ struct _GstPlayer
   GstClockTime last_seek_time;  /* Only set from main context */
   GSource *seek_source;
   GstClockTime seek_position;
-  /* If TRUE, all signals are inhibited except the
-   * state-changed:GST_PLAYER_STATE_STOPPED/PAUSED. This ensures that no signal
-   * is emitted after gst_player_stop/pause() has been called by the user. */
-  gboolean inhibit_sigs;
 
   /* For playbin3 */
   gboolean use_playbin3;
@@ -283,7 +279,6 @@ gst_player_init (GstPlayer * self)
   self->seek_pending = FALSE;
   self->seek_position = GST_CLOCK_TIME_NONE;
   self->last_seek_time = GST_CLOCK_TIME_NONE;
-  self->inhibit_sigs = FALSE;
 
   self->cached_position = 0;
   self->cached_duration = GST_CLOCK_TIME_NONE;
@@ -2702,7 +2697,6 @@ gst_player_new (GstPlayerVideoRenderer * video_renderer)
 
   g_once (&once, gst_player_init_once, NULL);
 
-  // Q: hmm ?
   self = g_object_new (GST_TYPE_PLAYER, 
       "video-renderer", video_renderer,
       NULL);
@@ -2803,10 +2797,6 @@ gst_player_play (GstPlayer * self)
 {
   g_return_if_fail (GST_IS_PLAYER (self));
 
-  g_mutex_lock (&self->lock);
-  self->inhibit_sigs = FALSE;
-  g_mutex_unlock (&self->lock);
-
   g_main_context_invoke_full (self->context, G_PRIORITY_DEFAULT,
       gst_player_play_internal, self, NULL);
 }
@@ -2873,10 +2863,6 @@ void
 gst_player_pause (GstPlayer * self)
 {
   g_return_if_fail (GST_IS_PLAYER (self));
-
-  g_mutex_lock (&self->lock);
-  self->inhibit_sigs = FALSE;
-  g_mutex_unlock (&self->lock);
 
   g_main_context_invoke_full (self->context, G_PRIORITY_DEFAULT,
       gst_player_pause_internal, self, NULL);
@@ -2962,10 +2948,6 @@ void
 gst_player_stop (GstPlayer * self)
 {
   g_return_if_fail (GST_IS_PLAYER (self));
-
-  g_mutex_lock (&self->lock);
-  self->inhibit_sigs = TRUE;
-  g_mutex_unlock (&self->lock);
 
   g_main_context_invoke_full (self->context, G_PRIORITY_DEFAULT,
       gst_player_stop_internal_dispatch, self, NULL);
