@@ -1,5 +1,6 @@
 gstplayer_sources = [
   'gstplayer.c',
+  'gstplayer-signal-adapter.c',
   'gstplayer-video-renderer.c',
   'gstplayer-media-info.c',
   'gstplayer-video-overlay-video-renderer.c',
@@ -11,6 +12,7 @@ gstplayer_headers = [
   'player-prelude.h',
   'gstplayer.h',
   'gstplayer-types.h',
+  'gstplayer-signal-adapter.h',
   'gstplayer-video-renderer.h',
   'gstplayer-media-info.h',
   'gstplayer-video-overlay-video-renderer.h',
