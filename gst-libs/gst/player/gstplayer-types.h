@@ -27,6 +27,7 @@
 G_BEGIN_DECLS
 
 typedef struct _GstPlayer GstPlayer;
+typedef struct _GstPlayerSignalAdapter GstPlayerSignalAdapter;
 typedef struct _GstPlayerClass GstPlayerClass;
 
 G_END_DECLS
