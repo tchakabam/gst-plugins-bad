@@ -26,6 +26,17 @@
 
 G_BEGIN_DECLS
 
+#define GST_TYPE_PLAYER_SIGNAL_ADAPTER             (gst_player_signal_adapter_get_type ())
+#define GST_IS_PLAYER_SIGNAL_ADAPTER(obj)          (G_TYPE_CHECK_INSTANCE_TYPE ((obj), GST_TYPE_PLAYER_SIGNAL_ADAPTER))
+#define GST_IS_PLAYER_SIGNAL_ADAPTER_CLASS(klass)  (G_TYPE_CHECK_CLASS_TYPE ((klass), GST_TYPE_PLAYER_SIGNAL_ADAPTER))
+#define GST_PLAYER_SIGNAL_ADAPTER_GET_CLASS(obj)   (G_TYPE_INSTANCE_GET_CLASS ((obj), GST_TYPE_PLAYER_SIGNAL_ADAPTER, GstPlayerSignalAdapterClass))
+#define GST_PLAYER_SIGNAL_ADAPTER(obj)             (G_TYPE_CHECK_INSTANCE_CAST ((obj), GST_TYPE_PLAYER_SIGNAL_ADAPTER, GstPlayerSignalAdapter))
+#define GST_PLAYER_SIGNAL_ADAPTER_CLASS(klass)     (G_TYPE_CHECK_CLASS_CAST ((klass), GST_TYPE_PLAYER_SIGNAL_ADAPTER, GstPlayerSignalAdapterClass))
+#define GST_PLAYER_SIGNAL_ADAPTER_CAST(obj)        ((GstPlayerSignalAdapter*)(obj))
+
+GST_PLAYER_API
+GType        gst_player_signal_adapter_get_type                      (void);
+
 GST_PLAYER_API
 GstPlayerSignalAdapter *  gst_player_signal_adapter_new                     (GstPlayer* player);
 

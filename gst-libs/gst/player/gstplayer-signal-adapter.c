@@ -64,17 +64,32 @@ G_DEFINE_TYPE (GstPlayerSignalAdapter, gst_player_signal_adapter, GST_TYPE_OBJEC
 
 static guint signals[SIGNAL_LAST] = { 0, };
 
-void gst_player_signal_adapter_dispose(GstPlayerSignalAdapter* adapter) {
+GST_PLAYER_API
+GstPlayerSignalAdapter *  gst_player_signal_adapter_new(GstPlayer* player) {
+  return NULL;
+}
+
+static void gst_player_signal_adapter_dispose(GObject* self) {
 
 }
 
-void gst_player_signal_adapter_finalize(GstPlayerSignalAdapter* adapter) {
+static void gst_player_signal_adapter_finalize(GObject* self) {
   
 }
+
+static void gst_player_signal_adapter_init (GstPlayerSignalAdapter * self)
+{
+  GST_TRACE_OBJECT (self, "Initializing");
+
+  GST_TRACE_OBJECT (self, "Initialized");
+}
+
 
 static void
 gst_player_signal_adapter_class_init (GstPlayerSignalAdapterClass * klass)
 {
+  GObjectClass *gobject_class = (GObjectClass *) klass;
+
   /*
   gobject_class->set_property = gst_player_set_property;
   gobject_class->get_property = gst_player_get_property;
@@ -149,14 +164,11 @@ gst_player_signal_adapter_class_init (GstPlayerSignalAdapterClass * klass)
       NULL, NULL, G_TYPE_NONE, 1, GST_TYPE_CLOCK_TIME);
 }
 
+#if 0
+
 static void
 eos_dispatch (gpointer user_data)
 {
-  GstPlayer *player = user_data;
-
-  if (player->inhibit_sigs)
-    return;
-
   g_signal_emit (player, signals[SIGNAL_END_OF_STREAM], 0);
 }
 
@@ -170,9 +182,6 @@ static void
 buffering_dispatch (gpointer user_data)
 {
   BufferingSignalData *data = user_data;
-
-  if (data->player->inhibit_sigs)
-    return;
 
   if (data->player->target_state >= GST_STATE_PAUSED) {
     g_signal_emit (data->player, signals[SIGNAL_BUFFERING], 0, data->percent);
@@ -443,3 +452,5 @@ mute_changed_dispatch (gpointer user_data)
   g_signal_emit (player, signals[SIGNAL_MUTE_CHANGED], 0);
   g_object_notify_by_pspec (G_OBJECT (player), param_specs[PROP_MUTE]);
 }
+
+#endif
