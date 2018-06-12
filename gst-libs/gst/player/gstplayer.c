@@ -44,7 +44,6 @@
 #endif
 
 #include "gstplayer.h"
-#include "gstplayer-signal-dispatcher-private.h"
 #include "gstplayer-video-renderer-private.h"
 #include "gstplayer-media-info-private.h"
 
@@ -100,7 +99,6 @@ enum
 {
   PROP_0,
   PROP_VIDEO_RENDERER,
-  PROP_SIGNAL_DISPATCHER,
   PROP_URI,
   PROP_SUBURI,
   PROP_POSITION,
@@ -121,24 +119,6 @@ enum
 
 enum
 {
-  SIGNAL_URI_LOADED,
-  SIGNAL_POSITION_UPDATED,
-  SIGNAL_DURATION_CHANGED,
-  SIGNAL_STATE_CHANGED,
-  SIGNAL_BUFFERING,
-  SIGNAL_END_OF_STREAM,
-  SIGNAL_ERROR,
-  SIGNAL_WARNING,
-  SIGNAL_VIDEO_DIMENSIONS_CHANGED,
-  SIGNAL_MEDIA_INFO_UPDATED,
-  SIGNAL_VOLUME_CHANGED,
-  SIGNAL_MUTE_CHANGED,
-  SIGNAL_SEEK_DONE,
-  SIGNAL_LAST
-};
-
-enum
-{
   GST_PLAY_FLAG_VIDEO = (1 << 0),
   GST_PLAY_FLAG_AUDIO = (1 << 1),
   GST_PLAY_FLAG_SUBTITLE = (1 << 2),
@@ -150,7 +130,6 @@ struct _GstPlayer
   GstObject parent;
 
   GstPlayerVideoRenderer *video_renderer;
-  GstPlayerSignalDispatcher *signal_dispatcher;
 
   gchar *uri;
   gchar *redirect_uri;
@@ -216,7 +195,6 @@ struct _GstPlayerClass
 #define parent_class gst_player_parent_class
 G_DEFINE_TYPE (GstPlayer, gst_player, GST_TYPE_OBJECT);
 
-static guint signals[SIGNAL_LAST] = { 0, };
 static GParamSpec *param_specs[PROP_LAST] = { NULL, };
 
 static void gst_player_dispose (GObject * object);
@@ -269,7 +247,7 @@ static GstPlayerStreamInfo *gst_player_stream_info_get_current_from_stream_id
 static void stream_notify_cb (GstStreamCollection * collection,
     GstStream * stream, GParamSpec * pspec, GstPlayer * self);
 
-static void emit_media_info_updated_signal (GstPlayer * self);
+static void on_media_info_updated (GstPlayer * self);
 
 static void *get_title (GstTagList * tags);
 static void *get_container_format (GstTagList * tags);
@@ -315,6 +293,7 @@ gst_player_init (GstPlayer * self)
 
 static GstStructure* 
 create_message_data_from_state (GstPlayer *self, GstPlayerMessage message_type) {
+
   // TODO: Make structure name a GQuark
   GstStructure *message_data = gst_structure_new_empty ("gst-player-message-data");
   GValue type = G_VALUE_INIT;
@@ -331,14 +310,18 @@ create_message_data_from_state (GstPlayer *self, GstPlayerMessage message_type) 
     gst_structure_set_value (message_data, "uri", &value);
     break;
   case GST_PLAYER_MESSAGE_POSITION_UPDATED:
+    g_mutex_lock(&self->lock);
     g_value_init (&value, G_TYPE_INT64);
     g_value_set_int64 (&value, self->cached_position);
     gst_structure_set_value (message_data, "position", &value);
+    g_mutex_unlock(&self->lock);
     break;
   case GST_PLAYER_MESSAGE_DURATION_CHANGED:
+    g_mutex_lock(&self->lock);
     g_value_init (&value, G_TYPE_INT64);
     g_value_set_int64 (&value, self->cached_duration);
     gst_structure_set_value (message_data, "duration", &value);
+    g_mutex_unlock(&self->lock);
     break;
   case GST_PLAYER_MESSAGE_STATE_CHANGED:
     g_value_init (&value, GST_TYPE_PLAYER_STATE);
@@ -447,12 +430,6 @@ gst_player_class_init (GstPlayerClass * klass)
       GST_TYPE_PLAYER_VIDEO_RENDERER,
       G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS);
 
-  param_specs[PROP_SIGNAL_DISPATCHER] =
-      g_param_spec_object ("signal-dispatcher",
-      "Signal Dispatcher", "Dispatcher for the signals to e.g. event loops",
-      GST_TYPE_PLAYER_SIGNAL_DISPATCHER,
-      G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS);
-
   param_specs[PROP_URI] = g_param_spec_string ("uri", "URI", "Current URI",
       DEFAULT_URI, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
@@ -527,72 +504,7 @@ gst_player_class_init (GstPlayerClass * klass)
       G_MININT64, G_MAXINT64, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
   g_object_class_install_properties (gobject_class, PROP_LAST, param_specs);
-
-  signals[SIGNAL_URI_LOADED] =
-      g_signal_new ("uri-loaded", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS, 0, NULL,
-      NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
-
-  signals[SIGNAL_POSITION_UPDATED] =
-      g_signal_new ("position-updated", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS, 0, NULL,
-      NULL, NULL, G_TYPE_NONE, 1, GST_TYPE_CLOCK_TIME);
-
-  signals[SIGNAL_DURATION_CHANGED] =
-      g_signal_new ("duration-changed", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS, 0, NULL,
-      NULL, NULL, G_TYPE_NONE, 1, GST_TYPE_CLOCK_TIME);
-
-  signals[SIGNAL_STATE_CHANGED] =
-      g_signal_new ("state-changed", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS, 0, NULL,
-      NULL, NULL, G_TYPE_NONE, 1, GST_TYPE_PLAYER_STATE);
-
-  signals[SIGNAL_BUFFERING] =
-      g_signal_new ("buffering", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS, 0, NULL,
-      NULL, NULL, G_TYPE_NONE, 1, G_TYPE_INT);
-
-  signals[SIGNAL_END_OF_STREAM] =
-      g_signal_new ("end-of-stream", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS, 0, NULL,
-      NULL, NULL, G_TYPE_NONE, 0, G_TYPE_INVALID);
-
-  signals[SIGNAL_ERROR] =
-      g_signal_new ("error", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS, 0, NULL,
-      NULL, NULL, G_TYPE_NONE, 1, G_TYPE_ERROR);
-
-  signals[SIGNAL_VIDEO_DIMENSIONS_CHANGED] =
-      g_signal_new ("video-dimensions-changed", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS, 0, NULL,
-      NULL, NULL, G_TYPE_NONE, 2, G_TYPE_INT, G_TYPE_INT);
-
-  signals[SIGNAL_MEDIA_INFO_UPDATED] =
-      g_signal_new ("media-info-updated", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS, 0, NULL,
-      NULL, NULL, G_TYPE_NONE, 1, GST_TYPE_PLAYER_MEDIA_INFO);
-
-  signals[SIGNAL_VOLUME_CHANGED] =
-      g_signal_new ("volume-changed", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS, 0, NULL,
-      NULL, NULL, G_TYPE_NONE, 0, G_TYPE_INVALID);
-
-  signals[SIGNAL_MUTE_CHANGED] =
-      g_signal_new ("mute-changed", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS, 0, NULL,
-      NULL, NULL, G_TYPE_NONE, 0, G_TYPE_INVALID);
-
-  signals[SIGNAL_WARNING] =
-      g_signal_new ("warning", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS, 0, NULL,
-      NULL, NULL, G_TYPE_NONE, 1, G_TYPE_ERROR);
-
-  signals[SIGNAL_SEEK_DONE] =
-      g_signal_new ("seek-done", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS, 0, NULL,
-      NULL, NULL, G_TYPE_NONE, 1, GST_TYPE_CLOCK_TIME);
-
+ 
   config_quark_initialize ();
 }
 
@@ -643,8 +555,6 @@ gst_player_finalize (GObject * object)
     gst_tag_list_unref (self->global_tags);
   if (self->video_renderer)
     g_object_unref (self->video_renderer);
-  if (self->signal_dispatcher)
-    g_object_unref (self->signal_dispatcher);
   if (self->current_vis_element)
     gst_object_unref (self->current_vis_element);
   if (self->config)
@@ -673,28 +583,6 @@ gst_player_constructed (GObject * object)
   G_OBJECT_CLASS (parent_class)->constructed (object);
 }
 
-typedef struct
-{
-  GstPlayer *player;
-  gchar *uri;
-} UriLoadedSignalData;
-
-static void
-uri_loaded_dispatch (gpointer user_data)
-{
-  UriLoadedSignalData *data = user_data;
-
-  g_signal_emit (data->player, signals[SIGNAL_URI_LOADED], 0, data->uri);
-}
-
-static void
-uri_loaded_signal_data_free (UriLoadedSignalData * data)
-{
-  g_object_unref (data->player);
-  g_free (data->uri);
-  g_free (data);
-}
-
 static gboolean
 gst_player_set_uri_internal (gpointer user_data)
 {
@@ -708,19 +596,7 @@ gst_player_set_uri_internal (gpointer user_data)
 
   g_object_set (self->playbin, "uri", self->uri, NULL);
 
-  if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
-          signals[SIGNAL_URI_LOADED], 0, NULL, NULL, NULL) != 0) {
-    UriLoadedSignalData *data = g_new (UriLoadedSignalData, 1);
-
-    data->player = g_object_ref (self);
-    data->uri = g_strdup (self->uri);
-
-    api_bus_post_message (self, GST_PLAYER_MESSAGE_URI_LOADED);
-
-    gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
-        uri_loaded_dispatch, data,
-        (GDestroyNotify) uri_loaded_signal_data_free);
-  }
+  api_bus_post_message (self, GST_PLAYER_MESSAGE_URI_LOADED);
 
   g_object_set (self->playbin, "suburi", NULL, NULL);
 
@@ -792,9 +668,6 @@ gst_player_set_property (GObject * object, guint prop_id,
   switch (prop_id) {
     case PROP_VIDEO_RENDERER:
       self->video_renderer = g_value_dup_object (value);
-      break;
-    case PROP_SIGNAL_DISPATCHER:
-      self->signal_dispatcher = g_value_dup_object (value);
       break;
     case PROP_URI:{
       g_mutex_lock (&self->lock);
@@ -971,31 +844,6 @@ main_loop_running_cb (gpointer user_data)
   return G_SOURCE_REMOVE;
 }
 
-typedef struct
-{
-  GstPlayer *player;
-  GstPlayerState state;
-} StateChangedSignalData;
-
-static void
-state_changed_dispatch (gpointer user_data)
-{
-  StateChangedSignalData *data = user_data;
-
-  if (data->player->inhibit_sigs && data->state != GST_PLAYER_STATE_STOPPED
-      && data->state != GST_PLAYER_STATE_PAUSED)
-    return;
-
-  g_signal_emit (data->player, signals[SIGNAL_STATE_CHANGED], 0, data->state);
-}
-
-static void
-state_changed_signal_data_free (StateChangedSignalData * data)
-{
-  g_object_unref (data->player);
-  g_free (data);
-}
-
 static void
 change_state (GstPlayer * self, GstPlayerState state)
 {
@@ -1008,49 +856,10 @@ change_state (GstPlayer * self, GstPlayerState state)
 
   self->app_state = state;
 
-  if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
-          signals[SIGNAL_STATE_CHANGED], 0, NULL, NULL, NULL) != 0) {
-    StateChangedSignalData *data = g_new (StateChangedSignalData, 1);
-
-    data->player = g_object_ref (self);
-    data->state = state;
-
-    api_bus_post_message (self, GST_PLAYER_MESSAGE_STATE_CHANGED);
-
-    gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
-        state_changed_dispatch, data,
-        (GDestroyNotify) state_changed_signal_data_free);
-  }
+  api_bus_post_message (self, GST_PLAYER_MESSAGE_STATE_CHANGED);
 }
 
-typedef struct
-{
-  GstPlayer *player;
-  GstClockTime position;
-} PositionUpdatedSignalData;
 
-static void
-position_updated_dispatch (gpointer user_data)
-{
-  PositionUpdatedSignalData *data = user_data;
-
-  if (data->player->inhibit_sigs)
-    return;
-
-  if (data->player->target_state >= GST_STATE_PAUSED) {
-    g_signal_emit (data->player, signals[SIGNAL_POSITION_UPDATED], 0,
-        data->position);
-    g_object_notify_by_pspec (G_OBJECT (data->player),
-        param_specs[PROP_POSITION]);
-  }
-}
-
-static void
-position_updated_signal_data_free (PositionUpdatedSignalData * data)
-{
-  g_object_unref (data->player);
-  g_free (data);
-}
 
 static gboolean
 tick_cb (gpointer user_data)
@@ -1062,17 +871,6 @@ tick_cb (gpointer user_data)
 
     api_bus_post_message (self, GST_PLAYER_MESSAGE_POSITION_UPDATED);
 
-    if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
-            signals[SIGNAL_POSITION_UPDATED], 0, NULL, NULL, NULL) != 0) {
-      PositionUpdatedSignalData *data = g_new (PositionUpdatedSignalData, 1);
-
-      data->player = g_object_ref (self);
-      data->position = position;
-
-      gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
-          position_updated_dispatch, data,
-          (GDestroyNotify) position_updated_signal_data_free);
-    }
   }
 
   return G_SOURCE_CONTINUE;
@@ -1165,33 +963,9 @@ remove_ready_timeout_source (GstPlayer * self)
   self->ready_timeout_source = NULL;
 }
 
-typedef struct
-{
-  GstPlayer *player;
-  GError *err;
-} ErrorSignalData;
 
 static void
-error_dispatch (gpointer user_data)
-{
-  ErrorSignalData *data = user_data;
-
-  if (data->player->inhibit_sigs)
-    return;
-
-  g_signal_emit (data->player, signals[SIGNAL_ERROR], 0, data->err);
-}
-
-static void
-free_error_signal_data (ErrorSignalData * data)
-{
-  g_object_unref (data->player);
-  g_clear_error (&data->err);
-  g_free (data);
-}
-
-static void
-emit_error (GstPlayer * self, GError * err)
+on_error (GstPlayer * self, GError * err)
 {
   GST_ERROR_OBJECT (self, "Error: %s (%s, %d)", err->message,
       g_quark_to_string (err->domain), err->code);
@@ -1201,17 +975,6 @@ emit_error (GstPlayer * self, GError * err)
   }
   self->error = g_error_copy (err);
   api_bus_post_message (self, GST_PLAYER_MESSAGE_ERROR);
-
-  if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
-          signals[SIGNAL_ERROR], 0, NULL, NULL, NULL) != 0) {
-    ErrorSignalData *data = g_new (ErrorSignalData, 1);
-
-    data->player = g_object_ref (self);
-    data->err = g_error_copy (err);
-
-    gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
-        error_dispatch, data, (GDestroyNotify) free_error_signal_data);
-  }
 
   g_error_free (err);
 
@@ -1257,33 +1020,10 @@ dump_dot_file (GstPlayer * self, const gchar * name)
   g_free (full_name);
 }
 
-typedef struct
-{
-  GstPlayer *player;
-  GError *err;
-} WarningSignalData;
+
 
 static void
-warning_dispatch (gpointer user_data)
-{
-  WarningSignalData *data = user_data;
-
-  if (data->player->inhibit_sigs)
-    return;
-
-  g_signal_emit (data->player, signals[SIGNAL_WARNING], 0, data->err);
-}
-
-static void
-free_warning_signal_data (WarningSignalData * data)
-{
-  g_object_unref (data->player);
-  g_clear_error (&data->err);
-  g_free (data);
-}
-
-static void
-emit_warning (GstPlayer * self, GError * err)
+on_warning (GstPlayer * self, GError * err)
 {
   GST_ERROR_OBJECT (self, "Warning: %s (%s, %d)", err->message,
       g_quark_to_string (err->domain), err->code);
@@ -1292,18 +1032,8 @@ emit_warning (GstPlayer * self, GError * err)
     g_error_free (self->warning);
   }
   self->warning = g_error_copy (err);
+
   api_bus_post_message (self, GST_PLAYER_MESSAGE_WARNING);
-
-  if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
-          signals[SIGNAL_WARNING], 0, NULL, NULL, NULL) != 0) {
-    WarningSignalData *data = g_new (WarningSignalData, 1);
-
-    data->player = g_object_ref (self);
-    data->err = g_error_copy (err);
-
-    gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
-        warning_dispatch, data, (GDestroyNotify) free_warning_signal_data);
-  }
 
   g_error_free (err);
 }
@@ -1338,7 +1068,7 @@ error_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg, gpointer user_data)
   player_err =
       g_error_new_literal (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
       full_message);
-  emit_error (self, player_err);
+  on_error (self, player_err);
 
   g_clear_error (&err);
   g_free (debug);
@@ -1378,24 +1108,13 @@ warning_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg, gpointer user_data)
   player_err =
       g_error_new_literal (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
       full_message);
-  emit_warning (self, player_err);
+  on_warning (self, player_err);
 
   g_clear_error (&err);
   g_free (debug);
   g_free (name);
   g_free (full_message);
   g_free (message);
-}
-
-static void
-eos_dispatch (gpointer user_data)
-{
-  GstPlayer *player = user_data;
-
-  if (player->inhibit_sigs)
-    return;
-
-  g_signal_emit (player, signals[SIGNAL_END_OF_STREAM], 0);
 }
 
 static void
@@ -1409,43 +1128,11 @@ eos_cb (G_GNUC_UNUSED GstBus * bus, G_GNUC_UNUSED GstMessage * msg,
   tick_cb (self);
   remove_tick_source (self);
 
-  if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
-          signals[SIGNAL_END_OF_STREAM], 0, NULL, NULL, NULL) != 0) {
+  api_bus_post_message (self, GST_PLAYER_MESSAGE_URI_LOADED);
 
-    api_bus_post_message (self, GST_PLAYER_MESSAGE_URI_LOADED);
-
-    gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
-        eos_dispatch, g_object_ref (self), (GDestroyNotify) g_object_unref);
-  }
   change_state (self, GST_PLAYER_STATE_STOPPED);
   self->buffering = 100;
   self->is_eos = TRUE;
-}
-
-typedef struct
-{
-  GstPlayer *player;
-  gint percent;
-} BufferingSignalData;
-
-static void
-buffering_dispatch (gpointer user_data)
-{
-  BufferingSignalData *data = user_data;
-
-  if (data->player->inhibit_sigs)
-    return;
-
-  if (data->player->target_state >= GST_STATE_PAUSED) {
-    g_signal_emit (data->player, signals[SIGNAL_BUFFERING], 0, data->percent);
-  }
-}
-
-static void
-buffering_signal_data_free (BufferingSignalData * data)
-{
-  g_object_unref (data->player);
-  g_free (data);
 }
 
 static void
@@ -1469,7 +1156,7 @@ buffering_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg, gpointer user_data)
     state_ret = gst_element_set_state (self->playbin, GST_STATE_PAUSED);
 
     if (state_ret == GST_STATE_CHANGE_FAILURE) {
-      emit_error (self, g_error_new (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
+      on_error (self, g_error_new (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
               "Failed to handle buffering"));
       return;
     }
@@ -1481,18 +1168,6 @@ buffering_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg, gpointer user_data)
     self->buffering = percent;
 
     api_bus_post_message(self, GST_PLAYER_MESSAGE_BUFFERING);
-
-    if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
-            signals[SIGNAL_BUFFERING], 0, NULL, NULL, NULL) != 0) {
-      BufferingSignalData *data = g_new (BufferingSignalData, 1);
-
-      data->player = g_object_ref (self);
-      data->percent = percent;
-
-      gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
-          buffering_dispatch, data,
-          (GDestroyNotify) buffering_signal_data_free);
-    }
   }
 
   g_mutex_lock (&self->lock);
@@ -1511,7 +1186,7 @@ buffering_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg, gpointer user_data)
     state_ret = gst_element_set_state (self->playbin, GST_STATE_PLAYING);
     /* Application state change is happening when the state change happened */
     if (state_ret == GST_STATE_CHANGE_FAILURE)
-      emit_error (self, g_error_new (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
+      on_error (self, g_error_new (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
               "Failed to handle buffering"));
   } else if (percent == 100 && self->target_state >= GST_STATE_PAUSED) {
     g_mutex_unlock (&self->lock);
@@ -1537,38 +1212,11 @@ clock_lost_cb (G_GNUC_UNUSED GstBus * bus, G_GNUC_UNUSED GstMessage * msg,
       state_ret = gst_element_set_state (self->playbin, GST_STATE_PLAYING);
 
     if (state_ret == GST_STATE_CHANGE_FAILURE)
-      emit_error (self, g_error_new (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
+      on_error (self, g_error_new (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
               "Failed to handle clock loss"));
   }
 }
 
-typedef struct
-{
-  GstPlayer *player;
-  gint width, height;
-} VideoDimensionsChangedSignalData;
-
-static void
-video_dimensions_changed_dispatch (gpointer user_data)
-{
-  VideoDimensionsChangedSignalData *data = user_data;
-
-  if (data->player->inhibit_sigs)
-    return;
-
-  if (data->player->target_state >= GST_STATE_PAUSED) {
-    g_signal_emit (data->player, signals[SIGNAL_VIDEO_DIMENSIONS_CHANGED], 0,
-        data->width, data->height);
-  }
-}
-
-static void
-video_dimensions_changed_signal_data_free (VideoDimensionsChangedSignalData *
-    data)
-{
-  g_object_unref (data->player);
-  g_free (data);
-}
 
 static void
 check_video_dimensions_changed (GstPlayer * self)
@@ -1607,24 +1255,8 @@ check_video_dimensions_changed (GstPlayer * self)
   gst_object_unref (video_sink);
 
 out:
-  if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
-          signals[SIGNAL_VIDEO_DIMENSIONS_CHANGED], 0, NULL, NULL, NULL) != 0) {
-    VideoDimensionsChangedSignalData *data =
-        g_new (VideoDimensionsChangedSignalData, 1);
-
-    data->player = g_object_ref (self);
-    data->width = width;
-    data->height = height;
-
-    self->video_width = width;
-    self->video_height = height;
-  
-    api_bus_post_message (self, GST_PLAYER_MESSAGE_VIDEO_DIMENSIONS_CHANGED);
-
-    gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
-        video_dimensions_changed_dispatch, data,
-        (GDestroyNotify) video_dimensions_changed_signal_data_free);
-  }
+    
+  api_bus_post_message (self, GST_PLAYER_MESSAGE_VIDEO_DIMENSIONS_CHANGED);
 }
 
 static void
@@ -1636,37 +1268,8 @@ notify_caps_cb (G_GNUC_UNUSED GObject * object,
   check_video_dimensions_changed (self);
 }
 
-typedef struct
-{
-  GstPlayer *player;
-  GstClockTime duration;
-} DurationChangedSignalData;
-
 static void
-duration_changed_dispatch (gpointer user_data)
-{
-  DurationChangedSignalData *data = user_data;
-
-  if (data->player->inhibit_sigs)
-    return;
-
-  if (data->player->target_state >= GST_STATE_PAUSED) {
-    g_signal_emit (data->player, signals[SIGNAL_DURATION_CHANGED], 0,
-        data->duration);
-    g_object_notify_by_pspec (G_OBJECT (data->player),
-        param_specs[PROP_DURATION]);
-  }
-}
-
-static void
-duration_changed_signal_data_free (DurationChangedSignalData * data)
-{
-  g_object_unref (data->player);
-  g_free (data);
-}
-
-static void
-emit_duration_changed (GstPlayer * self, GstClockTime duration)
+on_duration_changed (GstPlayer * self, GstClockTime duration)
 {
   gboolean updated = FALSE;
 
@@ -1676,67 +1279,25 @@ emit_duration_changed (GstPlayer * self, GstClockTime duration)
   GST_DEBUG_OBJECT (self, "Duration changed %" GST_TIME_FORMAT,
       GST_TIME_ARGS (duration));
 
-  self->cached_duration = duration;
   g_mutex_lock (&self->lock);
+  self->cached_duration = duration;
   if (self->media_info) {
     self->media_info->duration = duration;
     updated = TRUE;
   }
   g_mutex_unlock (&self->lock);
+
+  api_bus_post_message (self, GST_PLAYER_MESSAGE_DURATION_CHANGED);
+
   if (updated) {
-    emit_media_info_updated_signal (self);
-  }
-
-  if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
-          signals[SIGNAL_DURATION_CHANGED], 0, NULL, NULL, NULL) != 0) {
-    DurationChangedSignalData *data = g_new (DurationChangedSignalData, 1);
-
-    data->player = g_object_ref (self);
-    data->duration = duration;
-    gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
-        duration_changed_dispatch, data,
-        (GDestroyNotify) duration_changed_signal_data_free);
+    on_media_info_updated (self);
   }
 }
 
-typedef struct
-{
-  GstPlayer *player;
-  GstClockTime position;
-} SeekDoneSignalData;
-
 static void
-seek_done_dispatch (gpointer user_data)
-{
-  SeekDoneSignalData *data = user_data;
-
-  if (data->player->inhibit_sigs)
-    return;
-
-  g_signal_emit (data->player, signals[SIGNAL_SEEK_DONE], 0, data->position);
-}
-
-static void
-seek_done_signal_data_free (SeekDoneSignalData * data)
-{
-  g_object_unref (data->player);
-  g_free (data);
-}
-
-static void
-emit_seek_done (GstPlayer * self)
+on_seek_done (GstPlayer * self)
 {
   api_bus_post_message(self, GST_PLAYER_MESSAGE_SEEK_DONE);
-
-  if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
-          signals[SIGNAL_SEEK_DONE], 0, NULL, NULL, NULL) != 0) {
-    SeekDoneSignalData *data = g_new (SeekDoneSignalData, 1);
-
-    data->player = g_object_ref (self);
-    data->position = gst_player_get_position (self);
-    gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
-        seek_done_dispatch, data, (GDestroyNotify) seek_done_signal_data_free);
-  }
 }
 
 static void
@@ -1777,7 +1338,7 @@ state_changed_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg,
         g_object_unref (self->media_info);
       self->media_info = gst_player_media_info_create (self);
       g_mutex_unlock (&self->lock);
-      emit_media_info_updated_signal (self);
+      on_media_info_updated (self);
 
       g_object_get (self->playbin, "video-sink", &video_sink, NULL);
 
@@ -1795,7 +1356,7 @@ state_changed_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg,
       check_video_dimensions_changed (self);
       if (gst_element_query_duration (self->playbin, GST_FORMAT_TIME,
               &duration)) {
-        emit_duration_changed (self, duration);
+        on_duration_changed (self, duration);
       } else {
         self->cached_duration = GST_CLOCK_TIME_NONE;
       }
@@ -1819,7 +1380,7 @@ state_changed_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg,
           gst_player_seek_internal_locked (self);
         } else {
           GST_DEBUG_OBJECT (self, "Seek finished");
-          emit_seek_done (self);
+          on_seek_done (self);
         }
       }
 
@@ -1837,7 +1398,7 @@ state_changed_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg,
 
           state_ret = gst_element_set_state (self->playbin, GST_STATE_PLAYING);
           if (state_ret == GST_STATE_CHANGE_FAILURE)
-            emit_error (self, g_error_new (GST_PLAYER_ERROR,
+            on_error (self, g_error_new (GST_PLAYER_ERROR,
                     GST_PLAYER_ERROR_FAILED, "Failed to play"));
         } else if (self->buffering == 100) {
           change_state (self, GST_PLAYER_STATE_PAUSED);
@@ -1872,7 +1433,7 @@ duration_changed_cb (G_GNUC_UNUSED GstBus * bus, G_GNUC_UNUSED GstMessage * msg,
   gint64 duration = GST_CLOCK_TIME_NONE;
 
   if (gst_element_query_duration (self->playbin, GST_FORMAT_TIME, &duration)) {
-    emit_duration_changed (self, duration);
+    on_duration_changed (self, duration);
   }
 }
 
@@ -1903,7 +1464,7 @@ request_state_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg,
   self->target_state = state;
   state_ret = gst_element_set_state (self->playbin, state);
   if (state_ret == GST_STATE_CHANGE_FAILURE)
-    emit_error (self, g_error_new (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
+    on_error (self, g_error_new (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
             "Failed to change to requested state %s",
             gst_element_state_get_name (state)));
 }
@@ -1945,7 +1506,7 @@ tags_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg, gpointer user_data)
       self->media_info->tags = gst_tag_list_ref (tags);
       media_info_update (self, self->media_info);
       g_mutex_unlock (&self->lock);
-      emit_media_info_updated_signal (self);
+      on_media_info_updated (self);
     } else {
       if (self->global_tags)
         gst_tag_list_unref (self->global_tags);
@@ -2058,7 +1619,7 @@ stream_collection_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg,
   g_mutex_unlock (&self->lock);
 
   if (self->media_info && updated)
-    emit_media_info_updated_signal (self);
+    on_media_info_updated (self);
 }
 
 static void
@@ -2119,7 +1680,7 @@ streams_selected_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg,
   g_mutex_unlock (&self->lock);
 
   if (self->media_info && updated)
-    emit_media_info_updated_signal (self);
+    on_media_info_updated (self);
 }
 
 static void
@@ -2146,55 +1707,24 @@ player_clear_flag (GstPlayer * self, gint pos)
   GST_DEBUG_OBJECT (self, "setting flags=%#x", flags);
 }
 
-typedef struct
-{
-  GstPlayer *player;
-  GstPlayerMediaInfo *info;
-} MediaInfoUpdatedSignalData;
-
-static void
-media_info_updated_dispatch (gpointer user_data)
-{
-  MediaInfoUpdatedSignalData *data = user_data;
-
-  if (data->player->inhibit_sigs)
-    return;
-
-  if (data->player->target_state >= GST_STATE_PAUSED) {
-    g_signal_emit (data->player, signals[SIGNAL_MEDIA_INFO_UPDATED], 0,
-        data->info);
-  }
-}
-
-static void
-free_media_info_updated_signal_data (MediaInfoUpdatedSignalData * data)
-{
-  g_object_unref (data->player);
-  g_object_unref (data->info);
-  g_free (data);
-}
-
 /*
- * emit_media_info_updated_signal:
+ * on_media_info_updated:
  *
- * create a new copy of self->media_info object and emits the newly created
- * copy to user application. The newly created media_info will be unref'ed
- * as part of signal finalize method.
+ * create a new copy of self->media_info object and posts the newly created
+ * copy to user application.
  */
 static void
-emit_media_info_updated_signal (GstPlayer * self)
+on_media_info_updated (GstPlayer * self)
 {
+  /*
   MediaInfoUpdatedSignalData *data = g_new (MediaInfoUpdatedSignalData, 1);
   data->player = g_object_ref (self);
   g_mutex_lock (&self->lock);
   data->info = gst_player_media_info_copy (self->media_info);
   g_mutex_unlock (&self->lock);
+  */
 
   api_bus_post_message (self, GST_PLAYER_MESSAGE_MEDIA_INFO_UPDATED);
-  
-  gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
-      media_info_updated_dispatch, data,
-      (GDestroyNotify) free_media_info_updated_signal_data);
 }
 
 static GstCaps *
@@ -2551,7 +2081,7 @@ stream_notify_cb (GstStreamCollection * collection, GstStream * stream,
   g_mutex_unlock (&self->lock);
 
   if (emit_signal)
-    emit_media_info_updated_signal (self);
+    on_media_info_updated (self);
 }
 
 static void
@@ -2933,7 +2463,7 @@ tags_changed_cb (GstPlayer * self, gint stream_index, GType type)
   gst_player_stream_info_update_tags_and_caps (self, s);
   g_mutex_unlock (&self->lock);
 
-  emit_media_info_updated_signal (self);
+  on_media_info_updated (self);
 }
 
 static void
@@ -2961,42 +2491,11 @@ subtitle_tags_changed_cb (G_GNUC_UNUSED GstElement * playbin, gint stream_index,
 }
 
 static void
-volume_changed_dispatch (gpointer user_data)
-{
-  GstPlayer *player = user_data;
-
-  if (player->inhibit_sigs)
-    return;
-
-  g_signal_emit (player, signals[SIGNAL_VOLUME_CHANGED], 0);
-  g_object_notify_by_pspec (G_OBJECT (player), param_specs[PROP_VOLUME]);
-}
-
-static void
 volume_notify_cb (G_GNUC_UNUSED GObject * obj, G_GNUC_UNUSED GParamSpec * pspec,
     GstPlayer * self)
 {
 
   api_bus_post_message(self, GST_PLAYER_MESSAGE_VOLUME_CHANGED);
-
-  if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
-          signals[SIGNAL_VOLUME_CHANGED], 0, NULL, NULL, NULL) != 0) {
-    gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
-        volume_changed_dispatch, g_object_ref (self),
-        (GDestroyNotify) g_object_unref);
-  }
-}
-
-static void
-mute_changed_dispatch (gpointer user_data)
-{
-  GstPlayer *player = user_data;
-
-  if (player->inhibit_sigs)
-    return;
-
-  g_signal_emit (player, signals[SIGNAL_MUTE_CHANGED], 0);
-  g_object_notify_by_pspec (G_OBJECT (player), param_specs[PROP_MUTE]);
 }
 
 static void
@@ -3005,13 +2504,6 @@ mute_notify_cb (G_GNUC_UNUSED GObject * obj, G_GNUC_UNUSED GParamSpec * pspec,
 {
 
   api_bus_post_message(self, GST_PLAYER_MESSAGE_MUTE_CHANGED);
-
-  if (g_signal_handler_find (self, G_SIGNAL_MATCH_ID,
-          signals[SIGNAL_MUTE_CHANGED], 0, NULL, NULL, NULL) != 0) {
-    gst_player_signal_dispatcher_dispatch (self->signal_dispatcher, self,
-        mute_changed_dispatch, g_object_ref (self),
-        (GDestroyNotify) g_object_unref);
-  }
 }
 
 static void
@@ -3193,11 +2685,8 @@ gst_player_init_once (G_GNUC_UNUSED gpointer user_data)
 /**
  * gst_player_new:
  * @video_renderer: (transfer full) (allow-none): GstPlayerVideoRenderer to use
- * @signal_dispatcher: (transfer full) (allow-none): GstPlayerSignalDispatcher to use
  *
- * Creates a new #GstPlayer instance that uses @signal_dispatcher to dispatch
- * signals to some event loop system, or emits signals directly if NULL is
- * passed. See gst_player_g_main_context_signal_dispatcher_new().
+ * Creates a new #GstPlayer instance.
  *
  * Video is going to be rendered by @video_renderer, or if %NULL is provided
  * no special video set up will be done and some default handling will be
@@ -3206,23 +2695,22 @@ gst_player_init_once (G_GNUC_UNUSED gpointer user_data)
  * Returns: (transfer full): a new #GstPlayer instance
  */
 GstPlayer *
-gst_player_new (GstPlayerVideoRenderer * video_renderer,
-    GstPlayerSignalDispatcher * signal_dispatcher)
+gst_player_new (GstPlayerVideoRenderer * video_renderer)
 {
   static GOnce once = G_ONCE_INIT;
   GstPlayer *self;
 
   g_once (&once, gst_player_init_once, NULL);
 
-  self =
-      g_object_new (GST_TYPE_PLAYER, "video-renderer", video_renderer,
-      "signal-dispatcher", signal_dispatcher, NULL);
+  // Q: hmm ?
+  self = g_object_new (GST_TYPE_PLAYER, 
+      "video-renderer", video_renderer,
+      NULL);
+
   gst_object_ref_sink (self);
 
   if (video_renderer)
     g_object_unref (video_renderer);
-  if (signal_dispatcher)
-    g_object_unref (signal_dispatcher);
 
   return self;
 }
@@ -3278,7 +2766,7 @@ gst_player_play_internal (gpointer user_data)
   }
 
   if (state_ret == GST_STATE_CHANGE_FAILURE) {
-    emit_error (self, g_error_new (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
+    on_error (self, g_error_new (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
             "Failed to play"));
     return G_SOURCE_REMOVE;
   } else if (state_ret == GST_STATE_CHANGE_NO_PREROLL) {
@@ -3349,7 +2837,7 @@ gst_player_pause_internal (gpointer user_data)
 
   state_ret = gst_element_set_state (self->playbin, GST_STATE_PAUSED);
   if (state_ret == GST_STATE_CHANGE_FAILURE) {
-    emit_error (self, g_error_new (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
+    on_error (self, g_error_new (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
             "Failed to pause"));
     return G_SOURCE_REMOVE;
   } else if (state_ret == GST_STATE_CHANGE_NO_PREROLL) {
@@ -3504,7 +2992,7 @@ gst_player_seek_internal_locked (GstPlayer * self)
     g_mutex_unlock (&self->lock);
     state_ret = gst_element_set_state (self->playbin, GST_STATE_PAUSED);
     if (state_ret == GST_STATE_CHANGE_FAILURE) {
-      emit_error (self, g_error_new (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
+      on_error (self, g_error_new (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
               "Failed to seek"));
       g_mutex_lock (&self->lock);
       return;
@@ -3550,7 +3038,7 @@ gst_player_seek_internal_locked (GstPlayer * self)
 
   ret = gst_element_send_event (self->playbin, s_event);
   if (!ret)
-    emit_error (self, g_error_new (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
+    on_error (self, g_error_new (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
             "Failed to seek to %" GST_TIME_FORMAT, GST_TIME_ARGS (position)));
 
   g_mutex_lock (&self->lock);
