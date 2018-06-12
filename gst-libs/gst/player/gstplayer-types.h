@@ -27,8 +27,10 @@
 G_BEGIN_DECLS
 
 typedef struct _GstPlayer GstPlayer;
-typedef struct _GstPlayerSignalAdapter GstPlayerSignalAdapter;
 typedef struct _GstPlayerClass GstPlayerClass;
+
+typedef struct _GstPlayerSignalAdapter GstPlayerSignalAdapter;
+typedef struct _GstPlayerSignalAdapterClass GstPlayerSignalAdapterClass;
 
 G_END_DECLS
 
