@@ -25,7 +25,6 @@
 #include <gst/video/video.h>
 #include <gst/player/player-prelude.h>
 #include <gst/player/gstplayer-types.h>
-#include <gst/player/gstplayer-signal-dispatcher.h>
 #include <gst/player/gstplayer-video-renderer.h>
 #include <gst/player/gstplayer-media-info.h>
 
@@ -105,7 +104,6 @@ GType        gst_player_error_get_type                (void);
 #define      GST_PLAYER_ERROR                         (gst_player_error_quark ())
 #define      GST_TYPE_PLAYER_ERROR                    (gst_player_error_get_type ())
 
-// Q: Maybe we don't need to make this placeholder part of public API
 /**
  * GstPlayerError:
  * @GST_PLAYER_ERROR_FAILED: generic error.
@@ -153,7 +151,7 @@ GST_PLAYER_API
 GType        gst_player_get_type                      (void);
 
 GST_PLAYER_API
-GstPlayer *  gst_player_new                           (GstPlayerVideoRenderer * video_renderer, GstPlayerSignalDispatcher * signal_dispatcher);
+GstPlayer *  gst_player_new                           (GstPlayerVideoRenderer * video_renderer);
 
 GST_PLAYER_API
 GstBus *     gst_player_get_message_bus               (GstPlayer    * player);
