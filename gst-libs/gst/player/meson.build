@@ -1,9 +1,7 @@
 gstplayer_sources = [
   'gstplayer.c',
-  'gstplayer-signal-dispatcher.c',
   'gstplayer-video-renderer.c',
   'gstplayer-media-info.c',
-  'gstplayer-g-main-context-signal-dispatcher.c',
   'gstplayer-video-overlay-video-renderer.c',
   'gstplayer-visualization.c',
 ]
@@ -13,10 +11,8 @@ gstplayer_headers = [
   'player-prelude.h',
   'gstplayer.h',
   'gstplayer-types.h',
-  'gstplayer-signal-dispatcher.h',
   'gstplayer-video-renderer.h',
   'gstplayer-media-info.h',
-  'gstplayer-g-main-context-signal-dispatcher.h',
   'gstplayer-video-overlay-video-renderer.h',
   'gstplayer-visualization.h',
 ]
