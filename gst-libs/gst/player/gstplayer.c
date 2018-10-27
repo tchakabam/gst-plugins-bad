@@ -2551,6 +2551,11 @@ gst_player_main (gpointer data)
   } else
     self->playbin = gst_element_factory_make ("playbin", "playbin");
 
+  if (!self->playbin) {
+    g_warning("Playbin element was not created");
+    // TODO: handle this
+  }
+
   if (self->video_renderer) {
     GstElement *video_sink =
         gst_player_video_renderer_create_video_sink (self->video_renderer,
@@ -2567,6 +2572,8 @@ gst_player_main (gpointer data)
     g_warning ("GstPlayer: scaletempo element not available. Audio pitch "
         "will not be preserved during trick modes");
   }
+
+  // FIXME: crashes if playbin not existing
 
   self->bus = bus = gst_element_get_bus (self->playbin);
   bus_source = gst_bus_create_watch (bus);
