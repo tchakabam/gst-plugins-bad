@@ -35,10 +35,17 @@ G_BEGIN_DECLS
 #define GST_PLAYER_SIGNAL_ADAPTER_CAST(obj)        ((GstPlayerSignalAdapter*)(obj))
 
 GST_PLAYER_API
-GType        gst_player_signal_adapter_get_type                      (void);
+GType gst_player_signal_adapter_get_type (void);
+
+/**
+ * context is optional, can be NULL. When set, a bus-watching source will be attached to the context.
+ * The attached callback will emit the corresponding signal for the message received.
+ **/
+GST_PLAYER_API
+GstPlayerSignalAdapter *  gst_player_signal_adapter_new (GstBus*, GMainContext* context);
 
 GST_PLAYER_API
-GstPlayerSignalAdapter *  gst_player_signal_adapter_new                     (GstPlayer* player);
+gboolean gst_player_signal_adapter_consume_one (GstPlayerSignalAdapter*, GstClockTime max_timeout);
 
 G_END_DECLS
 

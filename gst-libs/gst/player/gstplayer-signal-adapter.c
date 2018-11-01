@@ -48,10 +48,18 @@ enum
   SIGNAL_LAST
 };
 
+enum
+{
+  PROP_0,
+  PROP_MESSAGE_BUS,
+  PROP_LAST
+};
+
 struct _GstPlayerSignalAdapter
 {
   GstObject parent;
-  GstPlayer *player;
+  GstBus *bus;
+  GSource *bus_event_source;
 };
 
 struct _GstPlayerSignalAdapterClass
@@ -64,39 +72,172 @@ G_DEFINE_TYPE (GstPlayerSignalAdapter, gst_player_signal_adapter, GST_TYPE_OBJEC
 
 static guint signals[SIGNAL_LAST] = { 0, };
 
-GST_PLAYER_API
-GstPlayerSignalAdapter *  gst_player_signal_adapter_new(GstPlayer* player) {
-  return NULL;
-}
+static GParamSpec *param_specs[PROP_LAST] = { NULL, };
 
-static void gst_player_signal_adapter_dispose(GObject* self) {
-
-}
-
-static void gst_player_signal_adapter_finalize(GObject* self) {
-  
-}
-
-static void gst_player_signal_adapter_init (GstPlayerSignalAdapter * self)
+static void
+gst_player_signal_adapter_emit(GstPlayerMessage message_type)
 {
-  GST_TRACE_OBJECT (self, "Initializing");
+  switch (message_type) {
+  case GST_PLAYER_MESSAGE_URI_LOADED:
 
-  GST_TRACE_OBJECT (self, "Initialized");
+    break;
+  case GST_PLAYER_MESSAGE_POSITION_UPDATED:
+
+    break;
+  case GST_PLAYER_MESSAGE_DURATION_CHANGED:
+
+    break;
+  case GST_PLAYER_MESSAGE_STATE_CHANGED:
+
+    break;
+  case GST_PLAYER_MESSAGE_BUFFERING:
+
+    break;
+  case GST_PLAYER_MESSAGE_END_OF_STREAM:
+    break;
+  case GST_PLAYER_MESSAGE_ERROR:
+
+    break;
+  case GST_PLAYER_MESSAGE_WARNING:
+
+    break;
+  case GST_PLAYER_MESSAGE_VIDEO_DIMENSIONS_CHANGED:
+
+    break;
+  case GST_PLAYER_MESSAGE_MEDIA_INFO_UPDATED:
+
+    break;
+  case GST_PLAYER_MESSAGE_VOLUME_CHANGED:
+
+    break;
+  case GST_PLAYER_MESSAGE_MUTE_CHANGED:
+
+    break;
+  case GST_PLAYER_MESSAGE_SEEK_DONE:
+
+    break;
+  default:
+    // Q: handle this some way?
+    break;
+  }
 }
 
+/**
+ * To integrate with other non-Glib event-loops.
+ *
+ * Plain blocking poll with optional timeout. If timeout is 0 a message has to be on the bus immediately..
+ * If timeout is GST_CLOCK_TIME_NONE, this function will block forever until a message was posted on the bus.
+ *
+ * Should not be used in combination with a main-context passed in the constructor unless intended. In this case,
+ * both the bus-watching event-sources callbacks and this function will compete for pop'ing off messages from the bus.
+ *
+ * If there is no concurrent consumer, this method when called repeatedly will consume and process on message
+ * from the bus on each call. That is, it will emit a signal (synchroneously) from within the call (_emit)
+ * and then unref the message obtained.
+ *
+ * Returns TRUE when a message was consumed, FALSE when none was obtained.
+ */
+GST_PLAYER_API
+gboolean gst_player_signal_adapter_poll_one (GstPlayerSignalAdapter * self, GstClockTime max_timeout)
+{
+  g_warn_if_fail(!self->bus_event_source);
+
+  GstMessage *msg = gst_bus_timed_pop(self->bus, max_timeout);
+  if (!msg) {
+    return FALSE;
+  }
+  gst_player_signal_adapter_emit(msg);
+  gst_message_unref(msg);
+  return TRUE;
+}
+
+static gboolean
+gst_player_signal_adapter_on_message(gpointer user_data)
+{
+  GstPlayerSignalAdapter *self = GST_PLAYER_SIGNAL_ADAPTER(user_data);
+  GstMessage *next_message = gst_bus_peek(self->bus);
+
+  GstStructure *s = gst_message_get_structure (next_message);
+
+  g_return_val_if_fail(
+    g_str_equal(
+      gst_structure_get_name(s), "gst-player-message-data"), FALSE);
+
+  GstPlayerMessage message_type;
+  gst_structure_get_enum(s, "player-message", GST_TYPE_PLAYER_MESSAGE, &message_type);
+
+  gst_player_signal_adapter_emit(message_type);
+
+  return TRUE;
+}
+
+GST_PLAYER_API
+GstPlayerSignalAdapter *  gst_player_signal_adapter_new(GstBus* bus, GMainContext* context) {
+
+  GstPlayerSignalAdapter *self = g_object_new (GST_TYPE_PLAYER_SIGNAL_ADAPTER,
+    "message-bus", bus,
+    NULL);
+
+  if (context) {
+    GSource* bus_event_source = gst_bus_create_watch(bus);
+    g_source_attach(bus_event_source, context);
+    g_source_set_callback (bus_event_source,
+      G_SOURCE_FUNC(gst_player_signal_adapter_on_message),
+      self,
+      NULL);
+
+    self->bus_event_source = bus_event_source;
+  }
+
+  return self;
+}
+
+static void
+gst_player_signal_adapter_init (GstPlayerSignalAdapter* object)
+{
+}
+
+static void
+gst_player_signal_adapter_dispose(GObject* object) {
+  GstPlayerSignalAdapter *self = GST_PLAYER_SIGNAL_ADAPTER(object);
+
+  if (self->bus_event_source) {
+    g_source_destroy (self->bus_event_source);
+    g_source_unref (self->bus_event_source);
+  }
+
+  gst_object_unref(self->bus);
+
+  G_OBJECT_CLASS (parent_class)->dispose (object);
+}
+
+static void
+gst_player_signal_adapter_set_property (GObject * object, guint prop_id,
+    const GValue * value, GParamSpec * pspec)
+{
+  GstPlayerSignalAdapter *self = GST_PLAYER_SIGNAL_ADAPTER(object);
+
+  switch (prop_id) {
+    case PROP_MESSAGE_BUS: {
+      GstBus *bus = GST_BUS(g_value_get_object (value));
+      self->bus = gst_object_ref(bus);
+      break;
+    }
+  }
+}
 
 static void
 gst_player_signal_adapter_class_init (GstPlayerSignalAdapterClass * klass)
 {
   GObjectClass *gobject_class = (GObjectClass *) klass;
 
-  /*
-  gobject_class->set_property = gst_player_set_property;
-  gobject_class->get_property = gst_player_get_property;
-  */
+  gobject_class->set_property = gst_player_signal_adapter_set_property;
   gobject_class->dispose = gst_player_signal_adapter_dispose;
-  gobject_class->finalize = gst_player_signal_adapter_finalize;
-  // gobject_class->constructed = gst_player_constructed;
+
+  param_specs[PROP_MESSAGE_BUS] =
+    g_param_spec_object ("message-bus", "Message Bus",
+    "Bus to consume player messages from", GST_TYPE_BUS,
+    G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS);
 
   signals[SIGNAL_URI_LOADED] =
       g_signal_new ("uri-loaded", G_TYPE_FROM_CLASS (klass),
