@@ -286,7 +286,7 @@ gst_player_init (GstPlayer * self)
   GST_TRACE_OBJECT (self, "Initialized");
 }
 
-static GstStructure* 
+static GstStructure*
 create_message_data_from_state (GstPlayer *self, GstPlayerMessage message_type) {
 
   // TODO: Make structure name a GQuark
@@ -376,8 +376,9 @@ create_message_data_from_state (GstPlayer *self, GstPlayerMessage message_type) 
   return message_data;
 }
 
-static void 
+static void
 api_bus_post_message (GstPlayer *self, GstPlayerMessage message_type) {
+
   GstStructure *message_data = create_message_data_from_state (self, message_type);
 
   GST_INFO ("API bus: %s-message: %" GST_PTR_FORMAT,
@@ -499,7 +500,7 @@ gst_player_class_init (GstPlayerClass * klass)
       G_MININT64, G_MAXINT64, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
   g_object_class_install_properties (gobject_class, PROP_LAST, param_specs);
- 
+
   config_quark_initialize ();
 }
 
@@ -1250,7 +1251,7 @@ check_video_dimensions_changed (GstPlayer * self)
   gst_object_unref (video_sink);
 
 out:
-    
+
   api_bus_post_message (self, GST_PLAYER_MESSAGE_VIDEO_DIMENSIONS_CHANGED);
 }
 
@@ -2704,7 +2705,7 @@ gst_player_new (GstPlayerVideoRenderer * video_renderer)
 
   g_once (&once, gst_player_init_once, NULL);
 
-  self = g_object_new (GST_TYPE_PLAYER, 
+  self = g_object_new (GST_TYPE_PLAYER,
       "video-renderer", video_renderer,
       NULL);
 
@@ -4332,7 +4333,7 @@ gst_player_config_get_user_agent (const GstStructure * config)
  * @config: a #GstPlayer configuration
  * @interval: interval in ms
  *
- * set interval in milliseconds between two position-updated signals.
+ * set desired interval in milliseconds between two position-updated messages.
  * pass 0 to stop updating the position.
  * Since 1.10
  */
